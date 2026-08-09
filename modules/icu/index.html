@@ -947,7 +947,7 @@ function collectBundle(){
     const chk = document.getElementById('bchk_'+idx);
     const txt = document.getElementById('btxt_'+idx);
     return {letter, domain:BUNDLE_DOMAINS[idx], done: chk?chk.checked:false, text: txt?txt.value.trim():''};
-  }).filter(b=>b.text);
+  }).filter(b=>b.done && b.text);
 }
 
 /* ---------------- COMPACT NOTE HTML (used for print + Word) ---------------- */

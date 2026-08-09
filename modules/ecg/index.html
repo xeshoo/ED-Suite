@@ -969,6 +969,49 @@ function drawPreExcited(){
   return s;
 }
 
+function drawSinusTach(){
+  const W = 320, H = 100, base = 55;
+  const beats = [0,34,68,102,136,170,204].map(function(x){ return {x0:x, o:{hasP:true, pInvert:false, bw:34, rAmp:24}}; });
+  let s = gridBG(W,H,8) + tracePath(stripStr(beats, base));
+  s += textLbl('P before every QRS, regular rhythm', 8, 16, TRACE_DARK);
+  s += textLbl('Sinus tachycardia — narrow QRS, ~170 bpm', 8, 92);
+  return s;
+}
+
+function drawAFib(){
+  const W = 320, H = 100, base = 55;
+  const widths = [36, 52, 40, 58, 34, 48, 44, 54, 38];
+  let x = 0;
+  const beats = widths.map(function(w){ const b = {x0:x, o:{hasP:false, bw:w, rAmp:24, fib:true}}; x += w; return b; });
+  let s = gridBG(W,H,8) + tracePath(stripStr(beats.filter(function(b){return b.x0 < W;}), base));
+  s += textLbl('Irregularly irregular, absent P waves', 8, 16, TRACE_DARK);
+  s += textLbl('Atrial fibrillation — fibrillatory baseline', 8, 92);
+  return s;
+}
+
+function drawMonomorphicVT(){
+  const W = 320, H = 100, base = 55;
+  const beats = [0,52,104,156,208].map(function(x){ return {x0:x, o:{hasP:false, bw:52, rAmp:28, qrsHalf:8, sAmp:14, tInvert:true, tAmp:9, notch:true}}; });
+  let s = gridBG(W,H,8) + tracePath(stripStr(beats, base), '#E54D4D', 2.2);
+  s += textLbl('Wide QRS, regular, AV dissociation', 8, 16, '#7A1223');
+  s += textLbl('Monomorphic ventricular tachycardia', 8, 92);
+  return s;
+}
+
+function drawVFib(){
+  const W = 320, H = 100, base = 55;
+  let pts = [];
+  for(let i = 0; i <= 80; i++){
+    const x = 4 + i * 3.8;
+    const y = base + (Math.sin(i*0.7)*12 + Math.sin(i*1.9)*8 + Math.sin(i*3.1)*5) * (0.5 + 0.5*Math.sin(i*0.15));
+    pts.push([x, y]);
+  }
+  let s = gridBG(W,H,8) + tracePath(ptsToStr(pts), '#E54D4D', 2.0);
+  s += textLbl('Chaotic, no organized QRS complexes', 8, 16, '#7A1223');
+  s += textLbl('Ventricular fibrillation — immediate defibrillation', 8, 92);
+  return s;
+}
+
 function renderGallery(){
   const container = document.getElementById('ecgGallery');
   const examples = [
@@ -978,7 +1021,11 @@ function renderGallery(){
     {id:'capture', title:'Capture / Fusion Beat', desc:'Narrow complex interrupting a wide-QRS VT run — confirms AV dissociation', svg:drawCaptureFusion},
     {id:'brugada', title:'Brugada Criteria (V1)', desc:'RBBB pattern with coved ST elevation, inverted T', svg:drawBrugada},
     {id:'torsades', title:'Torsades de Pointes', desc:'Polymorphic VT with twisting QRS axis', svg:drawTorsades},
-    {id:'preexcited', title:'Pre-excited AF (WPW)', desc:'Irregular, wide QRS, delta waves — high-risk pattern', svg:drawPreExcited}
+    {id:'preexcited', title:'Pre-excited AF (WPW)', desc:'Irregular, wide QRS, delta waves — high-risk pattern', svg:drawPreExcited},
+    {id:'sinus_tach', title:'Sinus Tachycardia', desc:'Regular, narrow QRS, P before every QRS, rate >100 bpm', svg:drawSinusTach},
+    {id:'afib', title:'Atrial Fibrillation', desc:'Irregularly irregular, absent P waves, fibrillatory baseline', svg:drawAFib},
+    {id:'mono_vt', title:'Monomorphic VT', desc:'Wide QRS, regular, no P waves, AV dissociation', svg:drawMonomorphicVT},
+    {id:'vfib', title:'Ventricular Fibrillation', desc:'Chaotic electrical activity, no organized QRS complexes', svg:drawVFib}
   ];
   container.innerHTML = examples.map(function(ex){
     return '<div class="ecg-card"><svg viewBox="0 0 320 100" xmlns="http://www.w3.org/2000/svg">'+ex.svg()+'</svg>'+
