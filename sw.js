@@ -1,10 +1,11 @@
-const CACHE_NAME = 'ed-suite-v1';
+const CACHE_NAME = 'ed-suite-v2';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './shared/docx-lite.js',
   './modules/ecg/index.html',
   './modules/icu/index.html',
   './modules/airway/index.html',
