@@ -7,8 +7,8 @@
 <title>T2D Navigator — Diabetes Clinical Decision Support</title>
 <link rel="manifest" href="../../manifest.json">
 <script src="../../shared/docx-lite.js" defer></script>
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">">
+<link rel="icon" href="../../icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
 <style>
 :root{
   --navy:#0F2540;--navy2:#16324F;--teal:#0E7C86;--teal-l:#E4F3F3;--teal-d:#0a5e66;
@@ -237,8 +237,7 @@ nav.tabbar button.active{color:var(--teal)}
   <button data-view="note"><span class="ic">📝</span>Note</button>
 </nav>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+
 
 <script>
 /* ====================================================================
@@ -377,7 +376,7 @@ const DEFAULT_LABS=[
 ];
 
 // ===================== STATE =====================
-const STORAGE_KEY='***';
+const STORAGE_KEY='t2dm_navigator_state';
 let state=loadState();
 
 function defaultState(){
@@ -1037,27 +1036,13 @@ function fallbackCopy(text){
 
 function exportPDF(){
   if(!state.noteGenerated){toast('Generate notes first.');return}
-  toast('Generating PDF...');
-  const el=document.getElementById('notesArea');
-  const capture=()=>{
-    const check=setInterval(()=>{
-      if(typeof html2canvas!=='undefined'&&typeof jspdf!=='undefined'){
-        clearInterval(check);
-        const orig=el.style.paddingTop;el.style.paddingTop=state.borderMargin+'px';
-        html2canvas(el,{scale:2,useCORS:true,backgroundColor:'#fff'}).then(canvas=>{
-          el.style.paddingTop=orig;const{jsPDF}=jspdf;const pdf=new jsPDF('p','mm','a4');
-          const img=canvas.toDataURL('image/png');const w=pdf.internal.pageSize.getWidth();
-          pdf.addImage(img,'PNG',0,0,w,(canvas.height*w)/canvas.width);
-          pdf.save('T2D_'+(state.patient.name||'patient').replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');toast('PDF exported!');
-        }).catch(e=>{el.style.paddingTop=orig;toast('PDF failed: '+e.message)});
-      }
-    },200);
-    setTimeout(()=>{clearInterval(check);toast('PDF library not loaded.')},10000);
-  };
+  /* Use browser Print (works offline, no CDN dependency) */
   if(state.handwritten){
     ensureHandwrittenFont();
-    if(document.fonts&&document.fonts.ready){document.fonts.ready.then(capture).catch(capture)}else setTimeout(capture,800);
-  }else capture();
+    let printed=false;const go=()=>{if(printed)return;printed=true;window.print()};
+    if(document.fonts&&document.fonts.ready){document.fonts.ready.then(go).catch(go)}
+    setTimeout(go,1200);
+  }else window.print();
 }
 
 function exportWord(){
