@@ -1,15 +1,16 @@
-const CACHE_NAME = 'ed-suite-v2';
+const CACHE_NAME = 'ed-suite-v3';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
   './shared/docx-lite.js',
   './modules/ecg/index.html',
   './modules/icu/index.html',
   './modules/airway/index.html',
-  './modules/consult/index.html',
+ './modules/consult/index.html',
   './modules/diabetes/index.html'
 ];
 
@@ -31,17 +32,27 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Fetch: cache-first, falling back to network
+// Fetch: cache-first for local assets, network-first for external resources
 self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  const isExternal = url.origin !== self.location.origin;
+
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(response => {
         if (!response || response.status !== 200) return response;
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        // Cache external resources (fonts, CDN libs) for offline use
+        if (isExternal && (url.hostname.includes('fonts.googleapis.com') || url.hostname.includes('fonts.gstatic.com') || url.hostname.includes('cdnjs.cloudflare.com'))) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        }
         return response;
       });
-    }).catch(() => caches.match('./index.html'))
+    }).catch(() => {
+      // For navigation requests, serve the cached hub page
+      if (e.request.mode === 'navigate') return caches.match('./index.html');
+      return caches.match(e.request);
+    })
   );
 });
