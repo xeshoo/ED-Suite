@@ -416,6 +416,7 @@ footer.app-footer{
   display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;
 }
 </style>
+<script src="../../shared/docx-lite.js" defer></script>
 </head>
 <body>
 
@@ -1450,13 +1451,17 @@ function doPrint(){
   setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} }, 350);
 }
 function exportWord(){
-  var html = generatePrintHTML();
-  var blob = new Blob(['\ufeff', html], {type:'application/msword'});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url; a.download = 'ECG_Algorithm_' + new Date().toISOString().slice(0,10) + '.doc';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  if(typeof DocxLite === 'undefined'){
+    alert('Word export library is still loading — try again in a moment.');
+    return;
+  }
+  var m = PRINT_MARGINS;
+  var container = document.createElement('div');
+  container.innerHTML = generatePrintHTML().replace(/<!DOCTYPE[^>]*>/i,'').replace(/<\/?(html|head|body|meta|title|style)[^>]*>/gi,'');
+  var fname = 'ECG_Algorithm_' + new Date().toISOString().slice(0,10);
+  DocxLite.exportRealDocx(container, m.top, m.left, fname, function(ok){
+    if(!ok) alert('Word export failed — check your internet connection and try again.');
+  });
 }
 </script>
 
