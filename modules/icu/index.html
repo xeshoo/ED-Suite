@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="../../icons/icon-192.png">
 <title>ICU Admission Suite</title>
 <link rel="manifest" href="../../manifest.json">
+<script src="../../shared/docx-lite.js" defer></script>
 <style>
 :root{
   --navy:#0b1b2b;
@@ -155,6 +156,7 @@ table.mini input{padding:5px 6px;font-size:16px;}
     <label>Bottom<input type="number" min="0" max="80" step="0.5" value="12" oninput="updateMargin('bottom',this.value)"></label>
   </div>
   <div class="mp-note">Set <b>Top</b> margin to clear your hospital letterhead header (~65mm / 2.5 inches). Adjust <b>Left</b> if paper has a ruled border. Values are remembered for this session.</div>
+  <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);font-weight:600;margin-top:2px;"><input type="checkbox" id="hwToggle" onchange="HW_STYLE=this.checked" style="width:16px;height:16px;margin:0;"> \u270D\uFE0F Handwritten style (Print/PDF only — needs internet on first use)</label>
   <button class="mp-done" onclick="toggleMarginPanel()">Done</button>
 </div>
 
@@ -199,20 +201,22 @@ function chipGroup(name, options, critSet){
 }
 function toggleChip(el){
   const group = el.dataset.group;
-  const multi = el.closest('[data-multi]') || el.parentElement.dataset.multi === '1';
-  // default: single-select within group unless data-multi on group wrapper
   const wrap = el.parentElement;
   if(wrap.dataset.multi === '1'){
     el.classList.toggle('on');
     if(el.classList.contains('crit-candidate')) el.classList.toggle('crit', el.classList.contains('on'));
   } else {
+    const wasOn = el.classList.contains('on');
     [...wrap.children].forEach(c=>{c.classList.remove('on');c.classList.remove('crit');});
-    el.classList.add('on');
-    if(el.classList.contains('crit-candidate')) el.classList.add('crit');
+    if(!wasOn){
+      el.classList.add('on');
+      if(el.classList.contains('crit-candidate')) el.classList.add('crit');
+    }
   }
   updateProgress();
   if(group==='indications') renderICUCriteriaFlag();
   if(group==='arf' || group==='apchronic') calcAPACHE();
+  if(group==='ventpreset') renderVentSuggestion();
   if(group==='stmorph'){ /* informational only, no scoring */ }
 }
 function getChipValue(name, multi){
@@ -234,7 +238,7 @@ function sec_id(){
       <div class="field"><label>Age (yrs)</label><input type="number" id="p_age" oninput="syncAge()"></div>
     </div>
     <div class="row3">
-      <div class="field"><label>Sex</label><select id="p_sex" onchange="calcRenalDosing()"><option value="">—</option><option value="M">Male</option><option value="F">Female</option></select></div>
+      <div class="field"><label>Sex</label><select id="p_sex" onchange="calcRenalDosing();renderVentSuggestion();"><option value="">—</option><option value="M">Male</option><option value="F">Female</option></select></div>
       <div class="field"><label>Date of Birth</label><input type="date" id="p_dob"></div>
       <div class="field"><label>Contact / Next of Kin</label><input type="text" id="p_nok"></div>
     </div>
@@ -299,7 +303,7 @@ function sec_exam(){
   <div class="card">
     <h2><span class="idx">F</span> Vital Signs <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">(derived values auto-calculate)</span></h2>
     <div class="row4">
-      <div class="field"><label>Temp °C</label><input type="number" step="0.1" id="v_temp"></div>
+      <div class="field"><label>Temp °F</label><input type="number" step="0.1" id="v_temp"></div>
       <div class="field"><label>HR bpm</label><input type="number" id="v_hr" oninput="calcMAP()"></div>
       <div class="field"><label>SBP</label><input type="number" id="v_sbp" oninput="calcMAP()"></div>
       <div class="field"><label>DBP</label><input type="number" id="v_dbp" oninput="calcMAP()"></div>
@@ -348,10 +352,26 @@ function sec_labs(){
   const tbl = rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td><input type="number" step="0.01" id="${r[2]}"${r[2]==='l_cr'?' oninput="calcRenalDosing();calcSOFA();calcAPACHE();"':(r[2]==='l_plt'||r[2]==='l_bili'?' oninput="calcSOFA()"':(r[2]==='l_na'||r[2]==='l_k'?' oninput="calcAPACHE()"':''))}></td></tr>`).join('');
   return `
   <div class="card">
-    <h2><span class="idx">H</span> Core Laboratory Panel <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">(streamlined to values that drive decisions/scores)</span></h2>
+    <h2><span class="idx">H0</span> Investigations / Scans to Order <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">(what you're advising now — separate from results below)</span></h2>
+    <div class="chip-group" data-multi="1" id="grp_ordinv">
+      ${ICU_ORDER_INVESTIGATIONS.map(o=>`<span class="chip" data-group="ordinv" onclick="toggleChip(this)">${o}</span>`).join('')}
+    </div>
+    <div class="field" style="margin-top:8px;"><label>Other investigation / scan to order (free text)</label><textarea id="oi_custom" placeholder="e.g. MRI brain with contrast"></textarea></div>
+  </div>
+  <div class="card">
+    <h2><span class="idx">H</span> Core Laboratory Panel <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">(results — streamlined to values that drive decisions/scores)</span></h2>
     <table class="mini"><thead><tr><th>Parameter</th><th>Unit</th><th>Value</th></tr></thead><tbody>${tbl}</tbody></table>
-    <div class="note">Full extended panel (ALT/AST/ALP/albumin, APTT/fibrinogen/D-dimer, HbA1c, troponin, BNP) removed from the default view — order and record these individually per clinical indication rather than as a blanket admission panel, per current stewardship guidance. Add free-text below if needed.</div>
-    <div class="field" style="margin-top:8px;"><label>Additional / abnormal results</label><textarea id="l_extra"></textarea></div>
+    <div class="note">Full extended panel (ALT/AST/ALP/albumin, APTT/fibrinogen/D-dimer, HbA1c, troponin, BNP) removed from the default view — add any of these, or any other investigation, below.</div>
+    <div class="field" style="margin-top:10px;">
+      <label>Add investigation</label>
+      <div style="display:flex;gap:6px;">
+        <input type="text" id="clNewName" placeholder="e.g. D-dimer" style="flex:2;">
+        <input type="text" id="clNewUnit" placeholder="unit" style="flex:1;">
+        <button type="button" onclick="addCustomLab()" style="flex:0 0 auto;padding:8px 14px;border-radius:7px;border:1px solid var(--teal);background:#fff;color:var(--teal-d);font-weight:700;">+ Add</button>
+      </div>
+    </div>
+    <div id="customLabsBox"></div>
+    <div class="field" style="margin-top:8px;"><label>Additional / abnormal results (free text)</label><textarea id="l_extra"></textarea></div>
   </div>
   <div class="card">
     <h2><span class="idx">I</span> Arterial Blood Gas</h2>
@@ -378,6 +398,45 @@ function sec_labs(){
     ${chipGroup('stmorph',['Not applicable / normal','Coved, downsloping (Type 1 Brugada pattern)','Saddleback (Type 2/3 Brugada pattern)','Concave STEMI-type elevation','Uncertain — needs cardiology review'])}
     <div class="note">Cognitive-check prompt only, not a diagnostic tool: a coved, downsloping ST segment in V\u2081\u2013V\u2083 raises Brugada-pattern concern (consider fever, Na-channel blockers, electrolyte derangement as precipitants) versus the concave/saddleback morphology more typical of pericarditis or early repolarisation — correlate clinically and get a formal cardiology read.</div>
   </div>`;
+}
+
+const ICU_ORDER_INVESTIGATIONS = [
+  'Repeat FBC/CBC','Repeat U&E / Creatinine','LFTs','Coagulation profile (PT/APTT/INR)','D-dimer',
+  'Blood cultures x2','Urine culture','Sputum / ETT aspirate culture','Wound/line-tip culture',
+  'Repeat lactate','Repeat ABG/VBG','Troponin','BNP/NT-proBNP','HbA1c','Amylase/Lipase',
+  'Blood group & crossmatch/hold','12-lead ECG','CXR','CT chest','CT abdomen/pelvis','CT head',
+  'CT angiogram','MRI brain','Abdominal ultrasound','Echocardiogram','Doppler (DVT screen)'
+];
+
+let customLabs = [];
+function addCustomLab(){
+  const name = val('clNewName').trim();
+  const unit = val('clNewUnit').trim();
+  if(!name) return;
+  customLabs.push({ id: 'cl_'+Date.now()+'_'+Math.floor(Math.random()*1000), name, unit });
+  setVal('clNewName',''); setVal('clNewUnit','');
+  renderCustomLabs();
+  document.getElementById('clNewName').focus();
+}
+function removeCustomLab(id){
+  customLabs = customLabs.filter(c=>c.id!==id);
+  renderCustomLabs();
+  updateProgress();
+}
+function renderCustomLabs(){
+  const box = document.getElementById('customLabsBox');
+  if(!box) return;
+  if(!customLabs.length){ box.innerHTML=''; return; }
+  box.innerHTML = `<table class="mini"><thead><tr><th>Parameter</th><th>Unit</th><th>Value</th><th></th></tr></thead><tbody>
+    ${customLabs.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.unit)}</td><td><input type="number" step="0.01" id="${c.id}_val" oninput="updateProgress()"></td><td><span onclick="removeCustomLab('${c.id}')" style="cursor:pointer;color:var(--red);font-weight:800;padding:0 4px;">&times;</span></td></tr>`).join('')}
+  </tbody></table>`;
+}
+function collectCustomLabs(){
+  return customLabs.map(c=>{
+    const v = val(c.id+'_val');
+    if(!v || v.trim()==='') return null;
+    return [ c.name + (c.unit?` (${c.unit})`:''), v ];
+  }).filter(Boolean);
 }
 
 function sec_scores(){
@@ -486,11 +545,136 @@ function sec_plan(){
     ${block('GI/Nutrition',['Early enteral feeding within 24\u201348h','Stress-ulcer ppx only if risk factors present','Bowel regimen'])}
     ${block('Infection',['Sepsis Hour-1 bundle (cultures \u2192 abx \u226460 min \u2192 lactate \u2192 fluids \u2192 pressors PRN)','Empiric antibiotics per local antibiogram','Daily de-escalation review','Source control'])}
     ${block('VTE/Skin/Mobility',['Pharmacologic VTE ppx (LMWH unless contraindicated)','Mechanical ppx (SCDs)','Repositioning schedule','Early mobilisation'])}
-    <div class="field" style="margin-top:6px;"><label>Antibiotics — agent / dose / route / indication</label><textarea id="pl_abx"></textarea></div>
     <div class="field"><label>Glycemic target</label><input type="text" id="pl_glucose" value="7.8–10.0 mmol/L (140–180 mg/dL) — NICE-SUGAR"></div>
     <div class="field"><label>Other orders / consults</label><textarea id="pl_other"></textarea></div>
     <div class="note">Ventilation, nutrition timing, stress-ulcer, sepsis-bundle and VTE items updated to current ATS/ESICM, ESPEN/ASPEN, Surviving Sepsis Campaign and CHEST guidance; Swan-Ganz/PAC removed as a routine order (retained only as a free-text option under Circulation if truly indicated) since routine PAC use is no longer supported by outcome data.</div>
+  </div>
+  <div class="card">
+    <h2><span class="idx">R1</span> Antibiotics <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">(select agent(s) — dose auto-adjusts to CrCl from Sec. O)</span></h2>
+    <div id="abxListBox"></div>
+    <div class="field" style="margin-top:8px;"><label>Other antibiotic / not listed above</label><textarea id="pl_abx_other"></textarea></div>
+    <div class="flag">Reference doses only — verify against local antibiogram/pharmacy before prescribing.</div>
+  </div>
+  <div class="card">
+    <h2><span class="idx">R2</span> Ventilator Settings</h2>
+    <label>Clinical scenario (for suggested settings — optional)</label>
+    ${chipGroup('ventpreset',['ARDS / Lung-Protective','COPD / Asthma','Normal / Post-op'])}
+    <div id="ventSuggestBox"></div>
+    <div class="row3">
+      <div class="field"><label>Mode</label><select id="vent_mode"><option value="">—</option><option>Volume Control (VC)</option><option>Pressure Control (PC)</option><option>Pressure-Regulated Volume Control (PRVC)</option><option>SIMV</option><option>Pressure Support (PSV)</option></select></div>
+      <div class="field"><label>Tidal Volume (mL)</label><input type="number" id="vent_tv"></div>
+      <div class="field"><label>Set RR /min</label><input type="number" id="vent_rr"></div>
+    </div>
+    <div class="row3">
+      <div class="field"><label>PEEP (cmH\u2082O)</label><input type="number" id="vent_peep"></div>
+      <div class="field"><label>FiO\u2082 (%)</label><input type="number" id="vent_fio2"></div>
+      <div class="field"><label>I:E ratio</label><input type="text" id="vent_ie" placeholder="e.g. 1:2"></div>
+    </div>
+    <div class="note">Tidal-volume target below is based on Ideal Body Weight (Devine formula, from height/sex) — not auto-filled into the order fields; enter your actual ordered settings above.</div>
+  </div>
+  <div class="card">
+    <h2><span class="idx">R3</span> Blood Products / Massive Transfusion</h2>
+    <label>MTP status</label>
+    ${chipGroup('mtp',['Not activated','MTP Activated'])}
+    <div class="row4">
+      <div class="field"><label>PRBC (units)</label><input type="number" id="bp_prbc"></div>
+      <div class="field"><label>FFP (units)</label><input type="number" id="bp_ffp"></div>
+      <div class="field"><label>Platelets (units/pool)</label><input type="number" id="bp_plt2"></div>
+      <div class="field"><label>Cryoprecipitate (units)</label><input type="number" id="bp_cryo"></div>
+    </div>
+    <label>Tranexamic acid given?</label>
+    ${chipGroup('txa',['Not given','TXA 1g IV given'])}
+    <div class="field"><label>Notes / ratio / indication</label><textarea id="bp_notes" placeholder="e.g. 1:1:1 PRBC:FFP:Plt, ongoing hemorrhage post-trauma"></textarea></div>
   </div>`;
+}
+
+const ICU_ANTIBIOTICS = [
+  {id:'pip_tazo',label:'Piperacillin-Tazobactam',dose:'4.5 g IV q6h',renal:c=>c==null?null:(c>=40?'4.5 g IV q6h':(c>=20?'3.375\u20134.5 g IV q8h':'2.25 g IV q6h (extended infusion preferred)'))},
+  {id:'meropenem',label:'Meropenem',dose:'1 g IV q8h',renal:c=>c==null?null:(c>=50?'1 g IV q8h':(c>=25?'1 g IV q12h':(c>=10?'500 mg IV q12h':'500 mg IV q24h (post-HD on dialysis days)')))},
+  {id:'vancomycin',label:'Vancomycin',dose:'Load 25\u201330 mg/kg once, then by level/AUC',renal:()=>null},
+  {id:'ceftriaxone',label:'Ceftriaxone',dose:'2 g IV q24h',renal:()=>null},
+  {id:'cefepime',label:'Cefepime',dose:'2 g IV q8h',renal:c=>c==null?null:(c>=60?'2 g IV q8h':(c>=30?'2 g IV q12h':(c>=11?'1 g IV q12h':'1 g IV q24h')))},
+  {id:'levofloxacin',label:'Levofloxacin',dose:'750 mg IV/PO q24h',renal:c=>c==null?null:(c>=50?'750 mg q24h':(c>=20?'750 mg once, then 750 mg q48h':'750 mg once, then 500 mg q48h'))},
+  {id:'metronidazole',label:'Metronidazole',dose:'500 mg IV q8h',renal:()=>null},
+  {id:'colistin',label:'Colistin',dose:'Specialist / pharmacokinetic dosing',renal:()=>null},
+  {id:'gentamicin',label:'Gentamicin',dose:'Specialist / pharmacokinetic (extended-interval) dosing',renal:()=>null},
+  {id:'clindamycin',label:'Clindamycin',dose:'900 mg IV q8h',renal:()=>null},
+  {id:'azithromycin',label:'Azithromycin',dose:'500 mg IV/PO q24h',renal:()=>null},
+  {id:'fluconazole',label:'Fluconazole',dose:'800 mg loading, then 400 mg IV/PO q24h',renal:c=>c==null?null:(c<50?'Loading dose unchanged; reduce maintenance dose by 50%':'800 mg loading, then 400 mg q24h')}
+];
+let selectedAbx = new Set();
+function getCurrentCrcl(){
+  const t = (document.getElementById('crclVal')||{}).textContent;
+  if(!t || t==='\u2014') return null;
+  const n = parseInt(t,10);
+  return isNaN(n)? null : n;
+}
+function toggleAbx(id){
+  if(selectedAbx.has(id)) selectedAbx.delete(id); else selectedAbx.add(id);
+  renderAbxList();
+  updateProgress();
+}
+function renderAbxList(){
+  const box = document.getElementById('abxListBox');
+  if(!box) return;
+  const crcl = getCurrentCrcl();
+  box.innerHTML = `<div class="check-list-icu">${ICU_ANTIBIOTICS.map(ab=>{
+    const sel = selectedAbx.has(ab.id);
+    const adj = ab.renal(crcl);
+    return `<div class="bundle-item" style="border-bottom:1px solid #eef1f1;">
+      <input type="checkbox" id="abx_${ab.id}" ${sel?'checked':''} onchange="toggleAbx('${ab.id}')">
+      <span class="txt" style="flex:1;">
+        <b>${esc(ab.label)}</b> \u2014 ${esc(ab.dose)}
+        ${adj? `<br><span style="color:var(--red);font-weight:700;font-size:12px;">\u{1F527} CrCl ${crcl}: ${esc(adj)}</span>` : ''}
+      </span>
+    </div>`;
+  }).join('')}</div>`;
+}
+function collectSelectedAbx(){
+  const crcl = getCurrentCrcl();
+  return [...selectedAbx].map(id=>{
+    const ab = ICU_ANTIBIOTICS.find(a=>a.id===id);
+    if(!ab) return null;
+    const adj = ab.renal(crcl);
+    return `${ab.label} \u2014 ${adj || ab.dose}`;
+  }).filter(Boolean);
+}
+
+const VENT_PRESETS = {
+  ards:{label:'ARDS / Lung-Protective',tvLowMult:6,tvHighMult:6,rr:'20\u201330/min, titrate to pH (permissive hypercapnia acceptable if pH \u22657.20)',peep:'8\u201312 cmH\u2082O \u2014 titrate via low-PEEP/FiO\u2082 ARDSnet table',fio2:'Lowest FiO\u2082 for SpO\u2082 88\u201395%',ie:'1:1\u20131:2',mode:'Volume Control (VC) or PRVC'},
+  copd:{label:'COPD / Asthma',tvLowMult:6,tvHighMult:8,rr:'8\u201312/min \u2014 keep LOW to avoid breath-stacking/auto-PEEP',peep:'Set \u2264 measured intrinsic PEEP (often 0\u20135)',fio2:'Lowest FiO\u2082 for SpO\u2082 88\u201392%',ie:'1:3\u20131:4 \u2014 prolong expiratory time',mode:'VC or Pressure Support (PSV)'},
+  normal:{label:'Normal / Post-op',tvLowMult:6,tvHighMult:8,rr:'12\u201316/min',peep:'5 cmH\u2082O',fio2:'30\u201340%, titrate for SpO\u2082 \u226594%',ie:'1:2',mode:'VC, PRVC or SIMV'}
+};
+function calcIBW(){
+  const htCm=+val('v_ht'); const sex=val('p_sex');
+  if(!htCm) return null;
+  const inches = htCm/2.54;
+  if(inches<55) return null;
+  const base = sex==='F'?45.5:50;
+  return +(base + 2.3*(inches-60)).toFixed(1);
+}
+function renderVentSuggestion(){
+  const box = document.getElementById('ventSuggestBox');
+  if(!box) return;
+  const chosen = [...document.querySelectorAll('#grp_ventpreset .chip.on')].map(c=>c.textContent)[0];
+  if(!chosen){ box.innerHTML=''; return; }
+  const key = chosen.startsWith('ARDS')?'ards':(chosen.startsWith('COPD')?'copd':'normal');
+  const p = VENT_PRESETS[key];
+  const ibw = calcIBW();
+  const tv = ibw? `${Math.round(ibw*p.tvLowMult)}\u2013${Math.round(ibw*p.tvHighMult)} mL (IBW ${ibw} kg)` : 'Enter height (Sec. F) & sex (Sec. A) for IBW-based target';
+  box.innerHTML = `<div class="calc-box">
+    <div class="score-row"><span class="score-label">Suggested \u2014 ${esc(p.label)}</span><span onclick="dismissVentSuggestion()" style="cursor:pointer;color:#9db3c2;font-weight:800;padding:0 4px;">&times; Dismiss</span></div>
+    <div class="interp">Mode: ${esc(p.mode)}</div>
+    <div class="interp">Tidal volume: ${tv}</div>
+    <div class="interp">RR: ${esc(p.rr)}</div>
+    <div class="interp">PEEP: ${esc(p.peep)}</div>
+    <div class="interp">FiO\u2082: ${esc(p.fio2)}</div>
+    <div class="interp">I:E: ${esc(p.ie)}</div>
+  </div>`;
+}
+function dismissVentSuggestion(){
+  document.querySelectorAll('#grp_ventpreset .chip').forEach(c=>{c.classList.remove('on');c.classList.remove('crit');});
+  renderVentSuggestion();
 }
 
 function sec_bundle(){
@@ -603,6 +787,7 @@ function calcBMI(){
   const w=+val('v_wt'), h=+val('v_ht');
   if(w&&h){ const bmi=(w/((h/100)**2)).toFixed(1); setVal('v_bmi', bmi); } else setVal('v_bmi','');
   calcRenalDosing();
+  renderVentSuggestion();
 }
 function syncAge(){
   const a = val('p_age');
@@ -775,7 +960,7 @@ function apGCSpts(gcs){ return 15-(gcs==null?15:gcs); }
 function calcAPACHE(){
   const target=document.getElementById('apacheVal'); if(!target) return;
   const age=+val('ap_age');
-  const temp=+val('v_temp'), map=+((val('v_map')||'').replace(/[^0-9]/g,''))||0, hr=+val('v_hr'), rr=+val('v_rr');
+  const tempF=+val('v_temp'), temp=tempF?(tempF-32)*5/9:0, map=+((val('v_map')||'').replace(/[^0-9]/g,''))||0, hr=+val('v_hr'), rr=+val('v_rr');
   const fio2=+val('abg_fio2'), pao2=+val('abg_pao2'), ph=+val('abg_ph');
   const na=+val('l_na'), k=+val('l_k'), cr=+val('l_cr');
   const hct=+val('ap_hct'), wbc=+val('ap_wbc');
@@ -813,6 +998,7 @@ function calcRenalDosing(){
     crclEl.textContent='—';
     document.getElementById('crclInterp').textContent = 'Enter age, sex, weight (Sec. F) and creatinine (Sec. H) to estimate.';
     if(tableBox) tableBox.innerHTML='';
+    renderAbxList();
     return;
   }
   const cr_mgdl = cr_umol/88.4;
@@ -839,6 +1025,7 @@ function calcRenalDosing(){
       ${Object.entries(doses).map(([k,v])=>`<tr><td style="white-space:nowrap;">${k}</td><td>${v}</td></tr>`).join('')}
     </tbody></table>`;
   }
+  renderAbxList();
 }
 
 /* ---------------- ICU criteria live flag ---------------- */
@@ -879,40 +1066,48 @@ const FIELD_MAP = [
   ['a_ref','Referring team','Identification'],['a_rec','Receiving physician','Identification'],
   ['dx_primary','Primary diagnosis','Diagnosis__full'],['dx_secondary','Comorbidities','Diagnosis__full'],
   ['h_hpi','HPI','History__full'],['h_allergy','Allergies','History'],['h_meds','Current medications','History'],
-  ['v_temp','Temp \u00b0C','Vitals'],['v_hr','HR','Vitals'],['v_sbp','SBP','Vitals'],['v_dbp','DBP','Vitals'],
+  ['v_temp','Temp \u00b0F','Vitals'],['v_hr','HR','Vitals'],['v_sbp','SBP','Vitals'],['v_dbp','DBP','Vitals'],
   ['v_rr','RR','Vitals'],['v_spo2','SpO\u2082 %','Vitals'],['v_wt','Wt kg','Vitals'],['v_ht','Ht cm','Vitals'],
   ['v_map','MAP','Vitals'],['v_bmi','BMI','Vitals'],['v_pain','Pain (0-10)','Vitals'],
   ['l_hb','Hb','Labs'],['l_wbc','WBC','Labs'],['l_plt','Plt','Labs'],['l_na','Na','Labs'],['l_k','K','Labs'],['l_urea','Urea','Labs'],
   ['l_cr','Creatinine','Labs'],['l_bili','Bilirubin','Labs'],['l_inr','INR','Labs'],['l_lac','Lactate','Labs'],['l_crp','CRP','Labs'],['l_pct','PCT','Labs'],
   ['l_extra','Additional labs','Labs__full'],
+  ['oi_custom','Other investigations/scans advised','Labs__full'],
   ['abg_ph','pH','ABG'],['abg_paco2','PaCO\u2082','ABG'],['abg_pao2','PaO\u2082','ABG'],['abg_hco3','HCO\u2083\u207b','ABG'],
   ['abg_fio2','FiO\u2082','ABG'],['abg_be','BE','ABG'],['abg_peep','PEEP','ABG'],
   ['img_findings','Imaging findings','Imaging__full'],
   ['s_uo','Urine output/24h','Scores'],['ap_age','Age (APACHE)','Scores'],['ap_hct','Hct','Scores'],['ap_wbc','WBC (APACHE)','Scores'],
   ['s_rass','RASS target','Scores'],['s_cam','CAM-ICU','Scores'],
   ['e_disctime','Code discussion date/time','Consent'],
-  ['pl_abx','Antibiotics','Plan__full'],['pl_glucose','Glycemic target','Plan'],['pl_other','Other orders','Plan__full'],
+  ['pl_abx_other','Other antibiotic (not listed)','Plan__full'],['pl_glucose','Glycemic target','Plan'],['pl_other','Other orders','Plan__full'],
+  ['vent_mode','Mode','Vent'],['vent_tv','Tidal volume (mL)','Vent'],['vent_rr','Set RR','Vent'],
+  ['vent_peep','PEEP','Vent'],['vent_fio2','FiO\u2082 %','Vent'],['vent_ie','I:E ratio','Vent'],
+  ['bp_prbc','PRBC (units)','Transfusion'],['bp_ffp','FFP (units)','Transfusion'],['bp_plt2','Platelets (units/pool)','Transfusion'],
+  ['bp_cryo','Cryoprecipitate (units)','Transfusion'],['bp_notes','Transfusion notes','Transfusion__full'],
   ['sb_s','S \u2013 Situation','SBAR__full'],['sb_b','B \u2013 Background','SBAR__full'],['sb_a','A \u2013 Assessment','SBAR__full'],['sb_r','R \u2013 Recommendation','SBAR__full'],
   ['pr_los','Estimated LOS (days)','Prognosis'],['pr_course','Expected course/discussion','Prognosis__full'],
   ['sg_admit','Admitting physician','Signatures'],['sg_consult','Consultant intensivist','Signatures'],['sg_dt','Date/time','Signatures']
 ];
 const CHIP_GROUPS = [
   ['source','Admission source','Identification'],['indications','ICU admission indications','Diagnosis'],
+  ['ordinv','Investigations / Scans Advised','Labs__full'],
   ['pmh','PMH','History'],['exam','Abnormal exam findings','Vitals'],
   ['stmorph','ECG ST-morphology (V1-V3)','Imaging__full'],
   ['capacity','Capacity','Consent'],['consent','Consent obtained from','Consent'],['code','Code status','Consent'],
   ['discussed','Discussed with','Consent'],['safety','Safety checklist','Consent'],['goals','Goals of care','Prognosis'],
   ['apchronic','APACHE chronic health category','Scores'],['arf','Acute renal failure (APACHE)','Scores'],
   ['Airway/Breathing','Airway/Breathing','Plan'],['Circulation','Circulation','Plan'],['Neuro/Sedation','Neuro/Sedation','Plan'],
-  ['Renal/Fluid','Renal/Fluid','Plan'],['GI/Nutrition','GI/Nutrition','Plan'],['Infection','Infection','Plan'],['VTE/Skin/Mobility','VTE/Skin/Mobility','Plan']
+  ['Renal/Fluid','Renal/Fluid','Plan'],['GI/Nutrition','GI/Nutrition','Plan'],['Infection','Infection','Plan'],['VTE/Skin/Mobility','VTE/Skin/Mobility','Plan'],
+  ['ventpreset','Ventilator scenario','Vent'],['mtp','MTP status','Transfusion'],['txa','Tranexamic acid','Transfusion']
 ];
-const SECTION_ORDER = ['Identification','Diagnosis','Diagnosis__full','History','History__full','Vitals','Labs','Labs__full','ABG','Imaging__full','Scores','Consent','Plan','Plan__full','SBAR__full','Prognosis','Prognosis__full','Signatures'];
+const SECTION_ORDER = ['Identification','Diagnosis','Diagnosis__full','History','History__full','Vitals','Labs','Labs__full','ABG','Imaging__full','Scores','Consent','Plan','Plan__full','Vent','Transfusion','Transfusion__full','SBAR__full','Prognosis','Prognosis__full','Signatures'];
 const SECTION_TITLES = {
   Identification:'Patient & Admission', Diagnosis:'Diagnosis', Diagnosis__full:'Diagnosis (detail)',
   History:'History', History__full:'History of Presenting Illness', Vitals:'Vitals / Exam', Labs:'Investigations',
   Labs__full:'Additional Labs', ABG:'Arterial Blood Gas', Imaging__full:'Imaging',
   Scores:'Severity Scoring Inputs', Consent:'Consent / Code Status / Safety', Plan:'Management Plan',
-  Plan__full:'Management Plan (detail)', SBAR__full:'SBAR Handover', Prognosis:'Prognosis',
+  Plan__full:'Management Plan (detail)', Vent:'Ventilator Settings', Transfusion:'Blood Products / MTP',
+  Transfusion__full:'Blood Products / MTP (detail)', SBAR__full:'SBAR Handover', Prognosis:'Prognosis',
   Prognosis__full:'Prognosis (detail)', Signatures:'Signatures'
 };
 
@@ -927,6 +1122,8 @@ function collectFilled(){
     const chosen = [...document.querySelectorAll(`[data-group="${CSS.escape(grp)}"].chip.on`)].map(c=>c.textContent);
     if(chosen.length) add(section,label,chosen.join(', '));
   });
+  collectCustomLabs().forEach(([label,value])=>add('Labs__full',label,value));
+  collectSelectedAbx().forEach(line=>add('Plan__full','Antibiotic',line));
   return by;
 }
 
@@ -986,10 +1183,11 @@ function generateNoteHTML(){
   }
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>ICU Admission Note — ${esc(name)}</title>
+  ${HW_STYLE?HW_FONT_LINK:''}
   <style>
     @page{margin:${m.top}mm ${m.right}mm ${m.bottom}mm ${m.left}mm;}
     *{box-sizing:border-box;}
-    body{font-family:Arial,Helvetica,sans-serif;font-size:9.6pt;line-height:1.32;color:#151515;margin:0;padding:0;}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:9.6pt;line-height:1.32;color:#151515;margin:0;padding:0;${HW_STYLE?HW_FONT_CSS:''}}
     .hdr{border-bottom:2px solid #0f8a8a;padding-bottom:6px;margin:0 0 10px;}
     .hdr h1{font-size:15pt;margin:0 0 2px;color:#0b1b2b;}
     .hdr .meta{font-size:8.5pt;color:#555;}
@@ -1014,6 +1212,9 @@ function generateNoteHTML(){
 
 /* ---------------- PRINT MARGIN SETTINGS ---------------- */
 const PRINT_MARGINS = {top:65, right:12, bottom:12, left:12};
+let HW_STYLE = false;
+const HW_FONT_LINK = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap">';
+const HW_FONT_CSS = "font-family:'Caveat',cursive !important;font-size:17pt;line-height:1.5;";
 
 function toggleMarginPanel(){
   const p = document.getElementById('marginPanel');
@@ -1031,21 +1232,32 @@ function doPrint(){
   const w = window.open('', '_blank');
   if(!w){ showToast('Pop-up blocked — allow pop-ups to print'); return; }
   w.document.open(); w.document.write(html); w.document.close();
-  w.onload = function(){ w.focus(); w.print(); };
-  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 350);
+  let printed = false;
+  const triggerPrint = ()=>{ if(printed) return; printed=true; try{ w.focus(); w.print(); }catch(e){} };
+  if(HW_STYLE && w.document.fonts && w.document.fonts.ready){
+    w.document.fonts.ready.then(triggerPrint).catch(triggerPrint);
+    setTimeout(triggerPrint, 1500);
+  } else {
+    w.onload = triggerPrint;
+    setTimeout(triggerPrint, 350);
+  }
 }
 
-/* ---------------- OUTPUT: WORD (.doc) ---------------- */
+/* ---------------- OUTPUT: WORD (.docx) ---------------- */
 function exportWord(){
-  const html = generateNoteHTML().replace('<style>','<style>@media print{}');
-  const blob = new Blob(['\ufeff', html], {type:'application/msword'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  if(typeof DocxLite === 'undefined'){ showToast('Word export is still loading — try again in a moment'); return; }
+  const html = generateNoteHTML();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const container = document.createElement('div');
+  const hdr = doc.querySelector('.hdr'); const wrap = doc.querySelector('.wrap');
+  if(hdr) container.appendChild(hdr);
+  if(wrap) container.appendChild(wrap);
   const name = (val('p_name')||'patient').replace(/\s+/g,'_');
-  a.href = url; a.download = `ICU_Admission_${name}.doc`;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('Word document downloaded');
+  showToast('Generating Word document…');
+  DocxLite.exportRealDocx(container, PRINT_MARGINS.top, PRINT_MARGINS.left, `ICU_Admission_${name}`, function(ok, err){
+    if(ok) showToast('Word document downloaded');
+    else showToast('Word export failed — check internet connection');
+  });
 }
 
 /* ---------------- OUTPUT: COPY (plain text) ---------------- */
@@ -1087,6 +1299,7 @@ function showToast(msg){
 
 function resetAll(){
   if(!confirm('Clear all entered data on this form?')) return;
+  customLabs = []; selectedAbx = new Set();
   document.querySelectorAll('input,textarea').forEach(i=>{ if(i.type!=='checkbox') i.value=''; else i.checked=false; });
   document.querySelectorAll('select').forEach(s=>s.selectedIndex=0);
   document.querySelectorAll('.chip.on').forEach(c=>c.classList.remove('on','crit'));
@@ -1109,6 +1322,7 @@ buildSections();
   const tEl=document.getElementById('a_time'); if(tEl) tEl.value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
 })();
 calcQSOFA();
+calcRenalDosing();
 updateProgress();
 updateStickyBar();
 </script>
