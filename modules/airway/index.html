@@ -848,6 +848,21 @@ input::placeholder { color: var(--text-muted); }
   .dash-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
+/* ---------- Dark mode ---------- */
+dark {
+  --bg:          #0a0f18;
+  --bg-card:     #111a28;
+  --bg-card-alt: #0d1520;
+  --surface:     #162030;
+  --border:      rgba(255,255,255,.1);
+  --text:        #d8dfe6;
+  --text-dim:    #7a8fa3;
+  --text-muted:  #4a6070;
+}
+body.dark { background: var(--bg); color: var(--text); }
+body.dark input, body.dark select { background: var(--surface); color: var(--text); border-color: var(--border); }
+body.dark .overlay-content, body.dark .modal { background: var(--bg-card); }
+
 /* ---------- Scrollbar ---------- */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
