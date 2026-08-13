@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0F2540">
 <title>T2D Navigator — Diabetes Clinical Decision Support</title>
 <link rel="manifest" href="../../manifest.json">
+<script src="../../shared/docx-lite.js" defer></script>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">">
 <style>
@@ -147,6 +148,9 @@ table.ref th{background:var(--navy);color:#fff;font-size:11px;text-transform:upp
 .note-print h3:first-child{margin-top:0}
 .note-print .entry{padding:3px 0;border-bottom:1px dotted var(--line)}
 .note-print .sig{margin-top:24px;border-top:1px solid var(--muted);padding-top:6px;font-style:italic;color:var(--muted)}
+.note-print.handwritten,.note-print.handwritten *{font-family:'Caveat',cursive !important;}
+.note-print.handwritten{font-size:19px;line-height:1.55}
+.note-print.handwritten h3{font-size:19px}
 
 .slider-group{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px;color:var(--muted)}
 .slider-group input[type=range]{flex:1;accent-color:var(--teal);max-width:180px}
@@ -379,7 +383,7 @@ let state=loadState();
 function defaultState(){
   return{
     caseName:"",createdAt:new Date().toISOString(),
-    patient:{name:"",age:"",gender:"",datetime:"",weight:"",height:"",bp:"",findings:""},
+    patient:{name:"",age:"",gender:"",datetime:"",weight:"",height:"",heightRaw:"",heightUnit:"cm",bp:"",findings:""},
     classify:{t2d:[false,false,false,false,false],flags:{},result:null},
     pathway:{
       framework:"comorbidity",
@@ -391,9 +395,11 @@ function defaultState(){
     insulin:{weight:"",a1c:"",basalLow:null,basalHigh:null,currentBasal:"",fbg:"",
       beamBedtime:"",beamFasting:"",prandialMethod:"",tdd:"",bolus:"",adjNotes:""},
     labs:{selected:[],customLabs:[]},
+    planSelected:{},
     egfr:"",
     drugsFilter:"all",
     borderMargin:20,
+    handwritten:false,
     noteGenerated:false
   };
 }
@@ -404,6 +410,7 @@ function loadState(){
       // Migration: add missing fields
       if(!s.templates)s.templates=[];
       if(!s.labs)s.labs={selected:[],customLabs:[]};
+      if(!s.planSelected)s.planSelected={};
       if(!s.egfr&&s.egfr!=="")s.egfr="";
       if(s.patient&&!s.patient.height)s.patient.height="";
       return s;
@@ -748,6 +755,10 @@ function renderLabs(root){
     <div class="card">
       <h3>🔬 Laboratory & Clinical Investigations</h3>
       <p class="muted small">Select relevant investigations. Add custom tests below.</p>
+      <div class="btn-row no-print" style="margin-bottom:8px">
+        <button class="btn ghost sm" id="labsSelectAll">Select all</button>
+        <button class="btn ghost sm" id="labsClearAll">Clear all</button>
+      </div>
       <div class="lab-grid">${labGrid}</div>
       ${customHtml}
       <div class="divider"></div>
@@ -757,6 +768,9 @@ function renderLabs(root){
         <button class="btn sm" id="addLabBtn">Add</button>
       </div>
     </div>`;
+
+  document.getElementById('labsSelectAll').addEventListener('click',()=>{s.selected=DEFAULT_LABS.map(l=>l.key);saveState();renderLabs(root)});
+  document.getElementById('labsClearAll').addEventListener('click',()=>{s.selected=[];saveState();renderLabs(root)});
 
   root.querySelectorAll('[data-lab]').forEach(inp=>inp.addEventListener('change',e=>{
     const k=e.target.dataset.lab;
@@ -771,6 +785,52 @@ function renderLabs(root){
 }
 
 // ===================== 7. NOTE =====================
+// Plan & Instructions — computed candidate list (stable keys so selections persist across regimen changes)
+function buildPlanItems(){
+  const egfrNum=parseFloat(state.egfr);
+  let egfrNote='';
+  if(!isNaN(egfrNum)){if(egfrNum<30)egfrNote='eGFR <30: Metformin contraindicated. Review all renally-cleared drugs.';else if(egfrNum<45)egfrNote='eGFR 30-45: Reduce metformin. Consider linagliptin (no renal adjustment).';else if(egfrNum<60)egfrNote='eGFR <60: Monitor renal function. Dose-adjust per SmPC.'}
+  const ins=state.insulin;
+  const insProvided=(ins.basalLow||ins.bolus)?true:!!ins.bolus;
+  const hasSGLT2=state.regimen.some(r=>/sglt2|empagliflozin|dapagliflozin|canagliflozin|jardiance|forxiga|synjardy/i.test(r.drug+' '+r.brand));
+  const hasMet=state.regimen.some(r=>/metformin/i.test(r.drug));
+  const hasSU=state.regimen.some(r=>/sulfonylurea|gliclazide|glimepiride|diamicron|amaryl|getryl/i.test(r.drug+' '+r.brand));
+  const hasDPP4=state.regimen.some(r=>/dpp|sitagliptin|vildagliptin|linagliptin|januvia|galvus|trajenta/i.test(r.drug+' '+r.brand));
+  const hasGLP1=state.regimen.some(r=>/glp|semaglutide|liraglutide|dulaglutide|ozempic|trulicity|rybelsus/i.test(r.drug+' '+r.brand));
+  const items=[];
+  items.push({key:'oral',text:'Continue current oral regimen as prescribed. Monitor for side effects.'});
+  if(hasMet)items.push({key:'met',text:'Metformin: ensure eGFR ≥30. Monitor GI tolerance.'});
+  if(hasSGLT2)items.push({key:'sglt2',text:'SGLT2i: counsel on genital hygiene, hydration, sick-day rules.'});
+  if(hasDPP4)items.push({key:'dpp4',text:'DPP-4i: well-tolerated, weight-neutral.'});
+  if(hasSU)items.push({key:'su',text:'SU: counsel on hypo risk. Regular meal timing.'});
+  if(hasGLP1)items.push({key:'glp1',text:'GLP-1 RA: titrate slowly. Weight loss + CV protection expected.'});
+  if(egfrNote)items.push({key:'egfr',text:egfrNote});
+  items.push({key:'ins',text:insProvided?'Insulin: titrate basal to FBG 4.0–7.0 mmol/L. Adjust by 2 U every 3–4 days.':'Insulin: not indicated. Consider if HbA1c above target despite oral therapy.'});
+  items.push({key:'monitor',text:'Monitoring: HbA1c every 3 months. Annual lipids, eGFR, uACR, eye exam.'});
+  items.push({key:'lifestyle',text:'Lifestyle: MNT, ≥150 min/wk activity, weight management.'});
+  items.push({key:'followup',text:'Follow-up: 4–12 weeks. Adjust per current clinical guidelines.'});
+  return items;
+}
+function renderPlanChecklist(root){
+  const box=document.getElementById('planChecklist');if(!box)return;
+  const items=buildPlanItems();
+  box.innerHTML=`<div class="btn-row no-print" style="margin-bottom:6px">
+      <button class="btn ghost sm" id="planSelectAll">Select all</button>
+      <button class="btn ghost sm" id="planClearAll">Clear all</button>
+    </div>
+    <div class="lab-grid">${items.map(it=>{
+      const on=state.planSelected[it.key]!==false;
+      return `<label class="lab-item ${on?'sel':''}"><input type="checkbox" data-plan="${it.key}" ${on?'checked':''}><span>${esc(it.text)}</span></label>`;
+    }).join('')}</div>`;
+  box.querySelectorAll('[data-plan]').forEach(inp=>inp.addEventListener('change',e=>{
+    state.planSelected[e.target.dataset.plan]=e.target.checked;
+    saveState();renderPlanChecklist(root);
+    if(state.noteGenerated)generateNotes(true);
+  }));
+  document.getElementById('planSelectAll').addEventListener('click',()=>{items.forEach(it=>state.planSelected[it.key]=true);saveState();renderPlanChecklist(root);if(state.noteGenerated)generateNotes(true)});
+  document.getElementById('planClearAll').addEventListener('click',()=>{items.forEach(it=>state.planSelected[it.key]=false);saveState();renderPlanChecklist(root);if(state.noteGenerated)generateNotes(true)});
+}
+
 function renderNote(root){
   const pt=state.patient;
   const egfrWarnings=getEgfrWarnings();
@@ -792,7 +852,15 @@ function renderNote(root){
         <label class="field"><span class="lbl">Date & Time</span><input type="datetime-local" id="ptDT" value="${escAttr(pt.datetime)}"></label>
         <label class="field"><span class="lbl">Weight (kg)</span><input type="number" id="ptWeight" value="${escAttr(pt.weight)}" step="0.1"></label></div>
       <div class="row">
-        <label class="field"><span class="lbl">Height (cm)</span><input type="number" id="ptHeight" value="${escAttr(pt.height)}" step="0.1" placeholder="e.g. 170"></label>
+        <label class="field"><span class="lbl">Height</span>
+          <div style="display:flex;gap:6px;">
+            <input type="number" id="ptHeight" value="${escAttr(pt.heightRaw!==undefined?pt.heightRaw:pt.height)}" step="0.1" placeholder="e.g. 170" style="flex:1;">
+            <select id="ptHeightUnit" style="flex:0 0 68px;">
+              <option value="cm" ${(pt.heightUnit||'cm')==='cm'?'selected':''}>cm</option>
+              <option value="in" ${pt.heightUnit==='in'?'selected':''}>in</option>
+            </select>
+          </div>
+        </label>
         <label class="field"><span class="lbl">Blood Pressure</span><input type="text" id="ptBP" value="${escAttr(pt.bp)}" placeholder="e.g. 130/84"></label></div>
       <div id="bmiDisplay"></div>
       <label class="field"><span class="lbl">eGFR (mL/min/1.73m²)</span><input type="number" id="egfrIn" value="${escAttr(state.egfr)}" placeholder="e.g. 75" step="1"></label>
@@ -806,25 +874,35 @@ function renderNote(root){
         <div class="flow-step" id="fl-4"><div class="step-num">4</div><div class="step-label">Insulin</div></div><div class="flow-arrow">→</div>
         <div class="flow-step" id="fl-5"><div class="step-num">5</div><div class="step-label">Labs</div></div><div class="flow-arrow">→</div>
         <div class="flow-step" id="fl-6"><div class="step-num">6</div><div class="step-label">Notes</div></div></div></div>
+    <div class="card no-print"><h3>📝 Plan & Instructions — select what to include</h3>
+      <p class="muted small">Untick anything you don't want printed on the note.</p>
+      <div id="planChecklist"></div>
+    </div>
     <div class="card">
       <h3 class="no-print">Clinical Note</h3>
       <div class="btn-row no-print" style="margin-bottom:10px">
         <button class="btn" id="genNotesBtn">📋 Generate</button>
         <button class="btn ghost" id="copyBtn">📋 Copy</button>
-        <button class="btn ghost" onclick="window.print()">🖨️ Print</button>
+        <button class="btn ghost" onclick="printNote()">🖨️ Print</button>
         <button class="btn ghost" id="pdfBtn">📄 PDF</button>
         <button class="btn ghost" onclick="exportWord()">📝 Word</button></div>
       <div class="slider-group no-print"><label>Top margin:</label>
         <input type="range" id="borderSlider" min="0" max="80" value="${state.borderMargin}">
         <span class="slider-val" id="sliderVal">${state.borderMargin}px</span></div>
-      <div id="notesArea" class="note-print" style="margin-top:8px;min-height:100px">${state.noteGenerated?'':'<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px"><div style="font-size:28px;margin-bottom:6px">📝</div>Click <b>Generate Notes</b> to create the note.</div>'}</div></div>`;
+      <label class="opt no-print" style="margin-top:6px;">
+        <input type="checkbox" id="hwToggle" ${state.handwritten?'checked':''}>
+        <span>✍️ Handwritten style (Print/PDF only — needs internet on first use)</span>
+      </label>
+      <div id="notesArea" class="note-print${state.handwritten?' handwritten':''}" style="margin-top:8px;min-height:100px">${state.noteGenerated?'':'<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px"><div style="font-size:28px;margin-bottom:6px">📝</div>Click <b>Generate Notes</b> to create the note.</div>'}</div></div>`;
 
   // Save patient fields
-  const savePt=()=>{state.patient.name=document.getElementById('ptName').value;state.patient.age=document.getElementById('ptAge').value;state.patient.gender=document.getElementById('ptGender').value;state.patient.datetime=document.getElementById('ptDT').value;state.patient.weight=document.getElementById('ptWeight').value;state.patient.height=document.getElementById('ptHeight').value;state.patient.bp=document.getElementById('ptBP').value;state.patient.findings=document.getElementById('ptFindings').value;state.egfr=document.getElementById('egfrIn').value;saveState();updateBMI()};
-  ['ptName','ptAge','ptGender','ptDT','ptWeight','ptHeight','ptBP','ptFindings','egfrIn'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('input',savePt)});
+  const savePt=()=>{state.patient.name=document.getElementById('ptName').value;state.patient.age=document.getElementById('ptAge').value;state.patient.gender=document.getElementById('ptGender').value;state.patient.datetime=document.getElementById('ptDT').value;state.patient.weight=document.getElementById('ptWeight').value;const hRaw=document.getElementById('ptHeight').value;const hUnit=document.getElementById('ptHeightUnit').value;state.patient.heightRaw=hRaw;state.patient.heightUnit=hUnit;state.patient.height=hRaw?(hUnit==='in'?(parseFloat(hRaw)*2.54).toFixed(1):hRaw):'';state.patient.bp=document.getElementById('ptBP').value;state.patient.findings=document.getElementById('ptFindings').value;state.egfr=document.getElementById('egfrIn').value;saveState();updateBMI()};
+  ['ptName','ptAge','ptGender','ptDT','ptWeight','ptHeight','ptHeightUnit','ptBP','ptFindings','egfrIn'].forEach(id=>{const el=document.getElementById(id);if(el){el.addEventListener('input',savePt);el.addEventListener('change',savePt);}});
 
   updateBMI();
+  renderPlanChecklist(root);
   document.getElementById('borderSlider').addEventListener('input',e=>{state.borderMargin=+e.target.value;saveState();document.getElementById('sliderVal').textContent=state.borderMargin+'px';document.getElementById('notesArea').style.paddingTop=state.borderMargin+'px'});
+  document.getElementById('hwToggle').addEventListener('change',e=>{state.handwritten=e.target.checked;saveState();document.getElementById('notesArea').classList.toggle('handwritten',state.handwritten);if(state.handwritten)ensureHandwrittenFont();});
   document.getElementById('genNotesBtn').addEventListener('click',()=>generateNotes(false));
   document.getElementById('copyBtn').addEventListener('click',copyNote);
   document.getElementById('pdfBtn').addEventListener('click',exportPDF);
@@ -884,28 +962,11 @@ function generateNotes(silent){
 
   // eGFR warnings for plan
   const egfrNum=parseFloat(state.egfr);
-  let egfrNote='';
-  if(!isNaN(egfrNum)){if(egfrNum<30)egfrNote='eGFR <30: Metformin contraindicated. Review all renally-cleared drugs.';else if(egfrNum<45)egfrNote='eGFR 30-45: Reduce metformin. Consider linagliptin (no renal adjustment).';else if(egfrNum<60)egfrNote='eGFR <60: Monitor renal function. Dose-adjust per SmPC.'}
 
-  // Plan
-  const p=[];
-  p.push('1. Continue current oral regimen as prescribed. Monitor for side effects.');
-  const hasSGLT2=state.regimen.some(r=>/sglt2|empagliflozin|dapagliflozin|canagliflozin|jardiance|forxiga|synjardy/i.test(r.drug+' '+r.brand));
-  const hasMet=state.regimen.some(r=>/metformin/i.test(r.drug));
-  const hasSU=state.regimen.some(r=>/sulfonylurea|gliclazide|glimepiride|diamicron|amaryl|getryl/i.test(r.drug+' '+r.brand));
-  const hasDPP4=state.regimen.some(r=>/dpp|sitagliptin|vildagliptin|linagliptin|januvia|galvus|trajenta/i.test(r.drug+' '+r.brand));
-  const hasGLP1=state.regimen.some(r=>/glp|semaglutide|liraglutide|dulaglutide|ozempic|trulicity|rybelsus/i.test(r.drug+' '+r.brand));
-  if(hasMet)p.push('2. Metformin: ensure eGFR ≥30. Monitor GI tolerance.');
-  if(hasSGLT2)p.push(`${p.length+1}. SGLT2i: counsel on genital hygiene, hydration, sick-day rules.`);
-  if(hasDPP4)p.push(`${p.length+1}. DPP-4i: well-tolerated, weight-neutral.`);
-  if(hasSU)p.push(`${p.length+1}. SU: counsel on hypo risk. Regular meal timing.`);
-  if(hasGLP1)p.push(`${p.length+1}. GLP-1 RA: titrate slowly. Weight loss + CV protection expected.`);
-  if(egfrNote)p.push(`${p.length+1}. ${egfrNote}`);
-  if(insProvided)p.push(`${p.length+1}. Insulin: titrate basal to FBG 4.0–7.0 mmol/L. Adjust by 2 U every 3–4 days.`);
-  else p.push(`${p.length+1}. Insulin: not indicated. Consider if HbA1c above target despite oral therapy.`);
-  p.push(`${p.length+1}. Monitoring: HbA1c every 3 months. Annual lipids, eGFR, uACR, eye exam.`);
-  p.push(`${p.length+1}. Lifestyle: MNT, ≥150 min/wk activity, weight management.`);
-  p.push(`${p.length+1}. Follow-up: 4–12 weeks. Adjust per current clinical guidelines.`);
+  // Plan — filtered by user's checklist selections (default: all included)
+  const planItems=buildPlanItems();
+  const activeItems=planItems.filter(it=>state.planSelected[it.key]!==false);
+  const p=activeItems.map((it,i)=>`${i+1}. ${esc(it.text)}`);
 
   const html=`
     <h3>PATIENT DEMOGRAPHICS</h3>
@@ -949,6 +1010,17 @@ function buildPlainText(pt,gender,dt,weight,height,bmi,egfrVal,bp,findings,basal
   return L.join('\n');
 }
 
+function ensureHandwrittenFont(){if(document.getElementById('hwFontLink'))return;const link=document.createElement('link');link.id='hwFontLink';link.rel='stylesheet';link.href='https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap';document.head.appendChild(link)}
+function printNote(){
+  if(!state.noteGenerated){toast('Generate notes first.');return}
+  if(state.handwritten){
+    ensureHandwrittenFont();
+    let printed=false;const go=()=>{if(printed)return;printed=true;window.print()};
+    if(document.fonts&&document.fonts.ready){document.fonts.ready.then(go).catch(go)}
+    setTimeout(go,1200);
+  }else window.print();
+}
+
 function copyNote(){
   const text=window._noteText;
   if(!text){toast('Generate notes first.');return}
@@ -967,43 +1039,38 @@ function exportPDF(){
   if(!state.noteGenerated){toast('Generate notes first.');return}
   toast('Generating PDF...');
   const el=document.getElementById('notesArea');
-  const check=setInterval(()=>{
-    if(typeof html2canvas!=='undefined'&&typeof jspdf!=='undefined'){
-      clearInterval(check);
-      const orig=el.style.paddingTop;el.style.paddingTop=state.borderMargin+'px';
-      html2canvas(el,{scale:2,useCORS:true,backgroundColor:'#fff'}).then(canvas=>{
-        el.style.paddingTop=orig;const{jsPDF}=jspdf;const pdf=new jsPDF('p','mm','a4');
-        const img=canvas.toDataURL('image/png');const w=pdf.internal.pageSize.getWidth();
-        pdf.addImage(img,'PNG',0,0,w,(canvas.height*w)/canvas.width);
-        pdf.save('T2D_'+(state.patient.name||'patient').replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');toast('PDF exported!');
-      }).catch(e=>{el.style.paddingTop=orig;toast('PDF failed: '+e.message)});
-    }
-  },200);
-  setTimeout(()=>{clearInterval(check);toast('PDF library not loaded.')},10000);
+  const capture=()=>{
+    const check=setInterval(()=>{
+      if(typeof html2canvas!=='undefined'&&typeof jspdf!=='undefined'){
+        clearInterval(check);
+        const orig=el.style.paddingTop;el.style.paddingTop=state.borderMargin+'px';
+        html2canvas(el,{scale:2,useCORS:true,backgroundColor:'#fff'}).then(canvas=>{
+          el.style.paddingTop=orig;const{jsPDF}=jspdf;const pdf=new jsPDF('p','mm','a4');
+          const img=canvas.toDataURL('image/png');const w=pdf.internal.pageSize.getWidth();
+          pdf.addImage(img,'PNG',0,0,w,(canvas.height*w)/canvas.width);
+          pdf.save('T2D_'+(state.patient.name||'patient').replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');toast('PDF exported!');
+        }).catch(e=>{el.style.paddingTop=orig;toast('PDF failed: '+e.message)});
+      }
+    },200);
+    setTimeout(()=>{clearInterval(check);toast('PDF library not loaded.')},10000);
+  };
+  if(state.handwritten){
+    ensureHandwrittenFont();
+    if(document.fonts&&document.fonts.ready){document.fonts.ready.then(capture).catch(capture)}else setTimeout(capture,800);
+  }else capture();
 }
 
 function exportWord(){
   if(!state.noteGenerated){toast('Generate notes first.');return}
+  if(typeof DocxLite==='undefined'){toast('Word export is still loading — try again in a moment');return}
   const el=document.getElementById('notesArea');
   const topPx=state.borderMargin||20;
   const topMm=Math.round(topPx*0.264583*10)/10;
-  const innerHtml=el.innerHTML;
-  let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>T2DM Note</title>';
-  html+='<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View></w:WordDocument></xml><![endif]-->';
-  html+='<style>@page{margin:'+topMm+'mm 12mm 12mm 12mm;}body{font-family:Georgia,serif;color:#111;font-size:11pt;line-height:1.5;margin:0;padding:0;}';
-  html+='h2{font-size:14pt;text-align:center;text-transform:uppercase;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:14px;}';
-  html+='h3{font-size:11pt;font-weight:700;margin:12px 0 4px;}';
-  html+='table{width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:8px;}td,th{padding:4px 6px;border:1px solid #ccc;text-align:left;}th{background:#f0f0f0;font-weight:700;}';
-  html+='ul{margin-left:20px;margin-bottom:4px;}li{margin-bottom:3px;}p{margin:2px 0 4px;}';
-  html+='.sig{margin-top:24px;border-top:1px solid #111;padding-top:6px;font-style:italic;}</style></head><body>';
-  html+=innerHtml+'</body></html>';
-  const blob=new Blob(['\ufeff',html],{type:'application/msword'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;a.download='T2DM_Note_'+new Date().toISOString().slice(0,10)+'.doc';
-  document.body.appendChild(a);a.click();document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast('Word file saved!');
+  const fname='T2DM_Note_'+(state.patient.name||'patient').replace(/[^a-zA-Z0-9]/g,'_')+'_'+new Date().toISOString().slice(0,10);
+  toast('Generating Word document…');
+  DocxLite.exportRealDocx(el, topMm, 12, fname, function(ok){
+    toast(ok?'Word file saved!':'Word export failed — check internet connection');
+  });
 }
 
 </script>
